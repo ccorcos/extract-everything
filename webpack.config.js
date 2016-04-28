@@ -1,88 +1,145 @@
 'use strict'
 
 const ExtractTextPlugin = require('extract-text-webpack-plugin')
+const fs = require('fs')
+const R = require('ramda')
+const mkdirp = require('mkdirp')
+const rimraf = require('rimraf')
 
-const files = {
-  // ex1: two pages to our website
-  home: {
-    src: './src/index.html',
-    dest: 'index.html',
-  },
-  dashboard: {
-    src: './src/dashboard/index.html',
-    dest: 'dashboard/index.html'
-  },
-  // ex2: an npm package we want to publish
-  package: {
-    src: './src/package.js',
-    dest: 'package.js'
-  },
-  // ex3: some css theme we want to publish
-  theme: {
-    src: './src/theme.css',
-    dest: 'theme.css'
-  },
+const file = {
+  src: './src/index.html',
+  dest: 'index.html',
 }
 
-const extract_loaders = [
-  { test: /\.js$/, loader: 'babel' },
-  { test: /\.html$/, loader: 'html?attrs=img:src link:href script:src' },
-  { test: /\.css$/, loader: 'css' },
-]
+// regex helpers ---------------------------------------------------------------
+const matchAll = R.curry((regex, index, str) => {
+  regex.lastIndex = 0
+  index = index || 0
+  const matches = []
+  let match = regex.exec(str)
+  while (match != null) {
+    matches.push(match[index])
+    match = regex.exec(str)
+  }
+  return matches
+})
+const matchOne = R.curry((regex, index, str) => {
+  regex.lastIndex = 0
+  let match = regex.exec(str)
+  return match && match[index]
+})
+const re = {
+  tag: (name) => new RegExp(`(<${name})[^>]+>`, 'g'),
+  attr: (name) => new RegExp(`${name}="([^"]+)"`, 'g'),
+}
+const attrEq = R.curry((attr, value, string) =>
+  matchOne(re.attr(attr), 1, string) === value)
 
-function getLoader(src) {
-  return extract_loaders.find(loader => loader.test.exec(src)).loader
+// ---------------------------------------------------------------------------
+
+const getStylesheets = R.pipe(
+  matchAll(re.tag('link'), 0),
+  R.filter(attrEq('rel','stylesheet')),
+  R.map(matchOne(re.attr('href'), 1))
+)
+
+const getJavaScript = R.pipe(
+  matchAll(re.tag('script'), 0),
+  R.map(matchOne(re.attr('src'), 1))
+)
+
+const getRequires = R.converge(
+  R.concat,
+  [getStylesheets, getJavaScript]
+)
+
+const writeRequire = file => `require("${file}");`
+
+const makeHtmlBuildFile = R.pipe(
+  getRequires,
+  R.map(writeRequire),
+  R.join('')
+)
+
+const strip = R.curry((char, string) => {
+  let str = string
+  if (R.head(string) === char) {
+    str = R.tail(str)
+  }
+  if (R.last(string) === char) {
+    str = R.init(string)
+  }
+  return str
+})
+
+const buildFileName = R.pipe(
+  strip('.'),
+  strip('/'),
+  R.replace('/', '_'),
+  R.replace(' ', '-'),
+  R.concat('.build/')
+)
+
+
+
+const html = fs.readFileSync(file.src, 'utf8')
+const entryContents = makeHtmlBuildFile(file.src)
+rimraf.sync('.build')
+rimraf.sync('dist')
+mkdirp.sync('.build')
+const entry = buildFileName(file.src)
+fs.writeFileSync(entry, entryContents, 'utf8')
+
+
+
+const removeStylesheet = R.curry((name, string) =>
+  R.replace(new RegExp(`<link[^>]+href="${name}"[^>]*>`, 'g'), '', string))
+const removeEachStylesheet = R.map(removeStylesheet, getStylesheets(html))
+const removeAllStylesheets = R.apply(R.pipe, removeEachStylesheet)
+
+const removeJavaScript = R.curry((name, string) =>
+  R.replace(new RegExp(`<script[^>]+src="${name}"[^>]*>[^<]*</script>`, 'g'), '', string))
+const removeEachJavaScript = R.map(removeJavaScript, getJavaScript(html))
+const removeAllJavaScript = R.apply(R.pipe, removeEachJavaScript)
+
+console.log(R.pipe(removeAllStylesheets, removeAllJavaScript)(html))
+
+
+function PostProcessHtmlPlugin(opt) {
+  this.src = opt.src
+  this.dest = opt.dest
 }
 
-const plugins = []
-const loaders = []
+PostProcessHtmlPlugin.prototype.apply = function(compiler) {
+  compiler.plugin('done', function() {
+    // no idea how to parse the compiler / compilation for output files
 
-// create an extract text plugin to preserve names of the entry files.
-Object.keys(files).forEach((name) => {
-  const file = files[name]
-  // extract to dest name
-  const plugin = new ExtractTextPlugin(file.dest)
-  // lookup loader for the src file
-  const loader = getLoader(file.src)
-  // extract it
-  loaders.push({
-    test: file.src,
-    loader: plugin.extract(loader)
   })
-  plugins.push(plugin)
-})
+}
 
-// wrap extract loaders with plugin and set output with hashed name
-extract_loaders.forEach(loader => {
-  const plugin = new ExtractTextPlugin('assets/[name]-[chunkhash].[ext]')
-  loaders.push({
-    test: loader.test,
-    loader: plugin.extract(loader.loader)
-  })
-  plugins.push(plugin)
-})
+const css = new ExtractTextPlugin('css/[name]-[chunkhash].css')
 
-// enter at all the file src
-const entry = {}
-Object.keys(files).forEach(name => {
-  entry[name] = files[name].src
-})
 
 module.exports = {
-  entry: entry,
+  entry: {
+    home: entry
+  },
   module: {
-    loaders: loaders.concat([
+    loaders: [
       { test: /\.jpg$/, loader: 'file' },
-    ])
+      { test: /\.js$/, loader: 'babel' },
+      { test: /\.css$/, loader: css.extract('css') },
+    ]
   },
   output: {
     publicPath: __dirname + '/dist/',
     path: 'dist',
-    filename: 'output.js'
+    filename: 'js/[name]-[chunkhash].js'
   },
-  plugins: plugins.concat([
-
-  ]),
+  plugins: [
+    css,
+    new PostProcessHtmlPlugin(file),
+  ],
   resolve: {
     root: [
       __dirname,

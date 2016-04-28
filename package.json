@@ -16,8 +16,13 @@
     "extract-text-webpack-plugin": "^1.0.1",
     "file-loader": "^0.8.5",
     "html-loader": "^0.4.3",
+    "mkdirp": "^0.5.1",
+    "rimraf": "^2.5.2",
     "style-loader": "^0.13.1",
     "url-loader": "^0.5.7",
     "webpack": "^1.13.0"
+  },
+  "dependencies": {
+    "ramda": "^0.21.0"
   }
 }
