@@ -16,6 +16,7 @@
     "extract-text-webpack-plugin": "^1.0.1",
     "file-loader": "^0.8.5",
     "html-loader": "^0.4.3",
+    "indexhtml-webpack-plugin": "^0.1.9",
     "mkdirp": "^0.5.1",
     "rimraf": "^2.5.2",
     "style-loader": "^0.13.1",
