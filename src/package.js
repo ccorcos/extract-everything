@@ -1,0 +1,1 @@
+console.log("an npm package perhaps")
